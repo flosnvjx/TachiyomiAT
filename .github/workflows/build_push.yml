@@ -59,7 +59,7 @@ jobs:
       - name: Set up gradle
         uses: gradle/actions/setup-gradle@cc4fc85e6b35bafd578d5ffbc76a5518407e1af0 # v4.2.1
 
-      # ── Manual run: single ABI, optionally debug-signed ────────────────
+      # ── Manual run: ABI selectable, optionally debug-signed ────────────
       - name: Build app (manual)
         if: github.event_name == 'workflow_dispatch'
         run: |
@@ -74,10 +74,18 @@ jobs:
           echo "gradlew assembleStandardRelease $ARGS"
           ./gradlew assembleStandardRelease $ARGS
 
-      # ── Push / tag: unchanged full build + unit tests ──────────────────
-      - name: Build app (push) and run unit tests
-        if: github.event_name != 'workflow_dispatch'
+      # ── Tag push on the canonical repo: emit *-unsigned.apk so the
+      #    release pipeline can re-sign with the real keystore secrets ────
+      - name: Build app (push tag, unsigned for real release signing)
+        if: github.event_name == 'push' && github.ref_type == 'tag' && github.repository == 'mannu691/TachiyomiAT'
         run: ./gradlew assembleStandardRelease testReleaseUnitTest testStandardReleaseUnitTest
+
+      # ── Every other push (branch push, or tag push on a fork where the
+      #    signing secrets aren't present): debug-sign so the APK is
+      #    always sideload-installable without any keystore ─────────────
+      - name: Build app (push, debug-signed so APK is always installable)
+        if: github.event_name == 'push' && (github.ref_type != 'tag' || github.repository != 'mannu691/TachiyomiAT')
+        run: ./gradlew assembleStandardRelease testReleaseUnitTest testStandardReleaseUnitTest -PuseDebugSigning=true
 
       - name: Upload APKs
         uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
@@ -96,13 +104,13 @@ jobs:
       # ── Tag-only release pipeline (unchanged semantics) ────────────────
 
       - name: Get tag name
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && github.repository == 'mannu691/TachiyomiAT'
+        if: github.event_name == 'push' && github.ref_type == 'tag' && github.repository == 'mannu691/TachiyomiAT'
         run: |
           set -x
           echo "VERSION_TAG=${GITHUB_REF/refs\/tags\//}" >> $GITHUB_ENV
 
       - name: Sign APK
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && github.repository == 'mannu691/TachiyomiAT'
+        if: github.event_name == 'push' && github.ref_type == 'tag' && github.repository == 'mannu691/TachiyomiAT'
         uses: r0adkll/sign-android-release@349ebdef58775b1e0d8099458af0816dc79b6407 # v1
         with:
           releaseDirectory: app/build/outputs/apk/standard/release
@@ -112,7 +120,7 @@ jobs:
           keyPassword: ${{ secrets.KEY_PASSWORD }}
 
       - name: Clean up build artifacts
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && github.repository == 'mannu691/TachiyomiAT'
+        if: github.event_name == 'push' && github.ref_type == 'tag' && github.repository == 'mannu691/TachiyomiAT'
         run: |
           set -e
 
@@ -137,7 +145,7 @@ jobs:
           echo "APK_X86_64_SHA=$sha" >> $GITHUB_ENV
 
       - name: Create Release
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && github.repository == 'mannu691/TachiyomiAT'
+        if: github.event_name == 'push' && github.ref_type == 'tag' && github.repository == 'mannu691/TachiyomiAT'
         uses: softprops/action-gh-release@01570a1f39cb168c169c802c3bceb9e93fb10974 # v2.1.0
         with:
           tag_name: ${{ env.VERSION_TAG }}
