@@ -16,6 +16,17 @@ on:
         required: false
         type: boolean
         default: true
+      abi:
+        description: "ABI to build (manual runs only). Choose 'universal' for all-in-one."
+        required: false
+        type: choice
+        options:
+          - arm64-v8a
+          - armeabi-v7a
+          - x86
+          - x86_64
+          - universal
+        default: arm64-v8a
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -48,18 +59,30 @@ jobs:
       - name: Set up gradle
         uses: gradle/actions/setup-gradle@cc4fc85e6b35bafd578d5ffbc76a5518407e1af0 # v4.2.1
 
-      - name: Build app (manual run, debug-signed for sideload)
-        if: github.event_name == 'workflow_dispatch' && inputs.sign_apk
-        run: ./gradlew assembleStandardRelease -PuseDebugSigning=true
+      # ── Manual run: single ABI, optionally debug-signed ────────────────
+      - name: Build app (manual)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          set -e
+          ARGS=""
+          if [ "${{ inputs.sign_apk }}" = "true" ]; then
+            ARGS="$ARGS -PuseDebugSigning=true"
+          fi
+          if [ "${{ inputs.abi }}" != "universal" ]; then
+            ARGS="$ARGS -PtargetAbi=${{ inputs.abi }}"
+          fi
+          echo "gradlew assembleStandardRelease $ARGS"
+          ./gradlew assembleStandardRelease $ARGS
 
-      - name: Build app (push / manual without signing) and run unit tests
-        if: github.event_name != 'workflow_dispatch' || !inputs.sign_apk
+      # ── Push / tag: unchanged full build + unit tests ──────────────────
+      - name: Build app (push) and run unit tests
+        if: github.event_name != 'workflow_dispatch'
         run: ./gradlew assembleStandardRelease testReleaseUnitTest testStandardReleaseUnitTest
 
       - name: Upload APKs
         uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         with:
-          name: apk-standard-release-${{ github.sha }}
+          name: apk-standard-release-${{ inputs.abi || 'all' }}-${{ github.sha }}
           path: app/build/outputs/apk/standard/release/*.apk
           if-no-files-found: error
 
@@ -70,9 +93,7 @@ jobs:
           path: app/build/outputs/mapping/standardRelease
           if-no-files-found: ignore
 
-      # ── Tag-only release pipeline (unchanged semantics) ──────────────
-      # Requires `github.event_name == 'push'` so that manually triggering
-      # this workflow on a tag cannot collide with the unsigned-APK flow.
+      # ── Tag-only release pipeline (unchanged semantics) ────────────────
 
       - name: Get tag name
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && github.repository == 'mannu691/TachiyomiAT'

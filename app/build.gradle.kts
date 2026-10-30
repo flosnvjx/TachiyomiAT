@@ -26,6 +26,12 @@ val supportedAbis = setOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
 android {
     namespace = "eu.kanade.tachiyomi"
 
+    // Optional ABI filter: -PtargetAbi=arm64-v8a
+    // When set, the build produces ONLY that ABI (no universal APK).
+    // When unset/empty, behaviour is unchanged (all ABIs + universal).
+    val targetAbi = (project.findProperty("targetAbi") as? String)
+        ?.takeIf { it.isNotBlank() && it in supportedAbis }
+
     defaultConfig {
         applicationId = "app.kanade.tachiyomi.at"
 
@@ -39,7 +45,11 @@ android {
         buildConfigField("boolean", "PREVIEW", "false")
 
         ndk {
-            abiFilters += supportedAbis
+            if (targetAbi != null) {
+                abiFilters += targetAbi
+            } else {
+                abiFilters += supportedAbis
+            }
         }
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -49,8 +59,13 @@ android {
         abi {
             isEnable = true
             reset()
-            include(*supportedAbis.toTypedArray())
-            isUniversalApk = true
+            if (targetAbi != null) {
+                include(targetAbi)
+                isUniversalApk = false
+            } else {
+                include(*supportedAbis.toTypedArray())
+                isUniversalApk = true
+            }
         }
     }
 
