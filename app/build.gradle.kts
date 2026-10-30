@@ -64,6 +64,14 @@ android {
             isShrinkResources = true
             isMinifyEnabled = true
             proguardFiles("proguard-android-optimize.txt", "proguard-rules.pro")
+
+            // Manual CI runs pass -PuseDebugSigning=true so the APK is
+            // installable (sideload) without needing a persistent keystore.
+            // Tag builds do NOT pass this, so they still emit *-unsigned.apk
+            // for r0adkll/sign-android-release to sign with repo secrets.
+            if (project.findProperty("useDebugSigning") == "true") {
+                signingConfig = signingConfigs.getByName("debug")
+            }
         }
         create("preview") {
             initWith(getByName("release"))

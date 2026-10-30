@@ -8,9 +8,14 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: "Branch or tag to build (default: current)"
+        description: "Branch or tag to build (default: current ref)"
         required: false
         type: string
+      sign_apk:
+        description: "Sign with auto-generated debug key so the APK is sideload-installable"
+        required: false
+        type: boolean
+        default: true
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -43,7 +48,12 @@ jobs:
       - name: Set up gradle
         uses: gradle/actions/setup-gradle@cc4fc85e6b35bafd578d5ffbc76a5518407e1af0 # v4.2.1
 
-      - name: Build app and run unit tests
+      - name: Build app (manual run, debug-signed for sideload)
+        if: github.event_name == 'workflow_dispatch' && inputs.sign_apk
+        run: ./gradlew assembleStandardRelease -PuseDebugSigning=true
+
+      - name: Build app (push / manual without signing) and run unit tests
+        if: github.event_name != 'workflow_dispatch' || !inputs.sign_apk
         run: ./gradlew assembleStandardRelease testReleaseUnitTest testStandardReleaseUnitTest
 
       - name: Upload APKs
@@ -60,15 +70,18 @@ jobs:
           path: app/build/outputs/mapping/standardRelease
           if-no-files-found: ignore
 
-      # Sign APK and create release for tags (unchanged — only runs on tag pushes)
+      # ── Tag-only release pipeline (unchanged semantics) ──────────────
+      # Requires `github.event_name == 'push'` so that manually triggering
+      # this workflow on a tag cannot collide with the unsigned-APK flow.
+
       - name: Get tag name
-        if: startsWith(github.ref, 'refs/tags/') && github.repository == 'mannu691/TachiyomiAT'
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && github.repository == 'mannu691/TachiyomiAT'
         run: |
           set -x
           echo "VERSION_TAG=${GITHUB_REF/refs\/tags\//}" >> $GITHUB_ENV
 
       - name: Sign APK
-        if: startsWith(github.ref, 'refs/tags/') && github.repository == 'mannu691/TachiyomiAT'
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && github.repository == 'mannu691/TachiyomiAT'
         uses: r0adkll/sign-android-release@349ebdef58775b1e0d8099458af0816dc79b6407 # v1
         with:
           releaseDirectory: app/build/outputs/apk/standard/release
@@ -78,7 +91,7 @@ jobs:
           keyPassword: ${{ secrets.KEY_PASSWORD }}
 
       - name: Clean up build artifacts
-        if: startsWith(github.ref, 'refs/tags/') && github.repository == 'mannu691/TachiyomiAT'
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && github.repository == 'mannu691/TachiyomiAT'
         run: |
           set -e
 
@@ -103,7 +116,7 @@ jobs:
           echo "APK_X86_64_SHA=$sha" >> $GITHUB_ENV
 
       - name: Create Release
-        if: startsWith(github.ref, 'refs/tags/') && github.repository == 'mannu691/TachiyomiAT'
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && github.repository == 'mannu691/TachiyomiAT'
         uses: softprops/action-gh-release@01570a1f39cb168c169c802c3bceb9e93fb10974 # v2.1.0
         with:
           tag_name: ${{ env.VERSION_TAG }}
